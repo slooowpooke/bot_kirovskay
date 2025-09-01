@@ -1,22 +1,34 @@
-
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
-# Read tokens from environment variables (set these in Render)
+# --- Настройки ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 MANAGER_CHAT_ID = os.getenv("MANAGER_CHAT_ID")
 
-# Validate environment variables
 if not TELEGRAM_TOKEN:
-    raise RuntimeError("Environment variable TELEGRAM_TOKEN is not set.")
+    raise RuntimeError("Не задан TELEGRAM_TOKEN")
 if not MANAGER_CHAT_ID:
-    raise RuntimeError("Environment variable MANAGER_CHAT_ID is not set.")
+    raise RuntimeError("Не задан MANAGER_CHAT_ID")
 
-# Conversation states
+# --- Health-сервер для Render ---
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def _run_health_server():
+    port = int(os.getenv("PORT", "8000"))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    server.serve_forever()
+
+# --- Состояния бота ---
 CONSENT, WAIT_VIDEO = range(2)
 
-# /start: greeting and policy consent
+# --- Обработчики команд ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [["Согласен ✅", "Не согласен ❌"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
@@ -28,22 +40,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return CONSENT
 
-# Handle consent
 async def consent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "Согласен ✅":
-        await update.message.reply_text("Отлично! Пришлите, пожалуйста, видео 🎥 (можно как видео или как файл)")
+        await update.message.reply_text("Отлично! Пришлите, пожалуйста, видео 🎥 (можно как видео или файл)")
         return WAIT_VIDEO
     else:
         await update.message.reply_text("Вы не согласились с политикой ❌. Диалог завершён.")
         return ConversationHandler.END
 
-# Wait for video and forward to manager
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Accept both native videos and documents that are videos
     video = update.message.video
     document = update.message.document
 
-    # Prefer native video
     file_id = None
     if video:
         file_id = video.file_id
@@ -51,31 +59,27 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_id = document.file_id
 
     if file_id:
-        # Notify and forward to manager chat
         try:
             await context.bot.send_message(MANAGER_CHAT_ID, f"📩 Новое видео от @{update.effective_user.username or update.effective_user.first_name}")
-            # send_video works with file_id
             await context.bot.send_video(MANAGER_CHAT_ID, file_id)
-        except Exception as e:
-            # If sending as video fails (size/codec), try as document
-            try:
-                await context.bot.send_document(MANAGER_CHAT_ID, file_id)
-            except Exception as e2:
-                await update.message.reply_text("Произошла ошибка при пересылке видео менеджеру. Попробуйте ещё раз позже.")
-                return ConversationHandler.END
+        except:
+            await context.bot.send_document(MANAGER_CHAT_ID, file_id)
 
         await update.message.reply_text("Спасибо! Видео получено ✅. Менеджер свяжется с вами.")
         return ConversationHandler.END
 
-    await update.message.reply_text("Пожалуйста, отправьте именно видео (как видео или файл) 🎥")
+    await update.message.reply_text("Пожалуйста, отправьте именно видео 🎥")
     return WAIT_VIDEO
 
-# /cancel: abort conversation
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Диалог завершён ❌")
     return ConversationHandler.END
 
+# --- Запуск ---
 def main():
+    # Запускаем Health-сервер
+    threading.Thread(target=_run_health_server, daemon=True).start()
+
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     conv_handler = ConversationHandler(
