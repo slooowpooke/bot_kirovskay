@@ -4,8 +4,8 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
 # Read tokens from environment variables (set these in Render)
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-MANAGER_CHAT_ID = os.getenv("MANAGER_CHAT_ID")
+TELEGRAM_TOKEN = os.getenv("8185851567:AAH29NOqthPSGNuop5mBVrirutZnPk_XjYU")
+MANAGER_CHAT_ID = os.getenv("6094061694")
 
 # Validate environment variables
 if not TELEGRAM_TOKEN:
